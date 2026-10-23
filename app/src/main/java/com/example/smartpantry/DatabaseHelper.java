@@ -9,11 +9,30 @@ import android.database.sqlite.SQLiteOpenHelper;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * DatabaseHelper is the single gateway between the app and its SQLite database.
+ *
+ * HOW SQLITE WORKS IN THIS APP (end to end):
+ *  1. The first time any screen calls getReadableDatabase() or
+ *     getWritableDatabase(), Android creates the file "smart_pantry.db" in the
+ *     app's private storage and calls onCreate() ONCE. That is where the tables
+ *     are created and the recipes are seeded.
+ *  2. On every later app start the file already exists, so onCreate() is not
+ *     called again. This is why pantry items are still there after the app is
+ *     closed and reopened (persistence).
+ *  3. If DB_VERSION is increased in a future release, onUpgrade() runs.
+ *
+ * It owns three tables:
+ *  - pantry              the user's ingredients (full CRUD)
+ *  - recipes             the recipe name and method (seeded, read only)
+ *  - recipe_ingredients  what each recipe needs (seeded, read only)
+ */
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "smart_pantry.db";
     private static final int DB_VERSION = 1;
 
+    // Table names are constants so a typo is a compile error, not a runtime crash.
     private static final String T_PANTRY = "pantry";
     private static final String T_RECIPES = "recipes";
     private static final String T_ING = "recipe_ingredients";
@@ -22,8 +41,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         super(context, DB_NAME, null, DB_VERSION);
     }
 
+    /**
+     * Called once, when the database file is first created.
+     * Creates the three tables and then fills the recipe tables with seed data.
+     */
     @Override
     public void onCreate(SQLiteDatabase db) {
+        // Pantry: one row per ingredient the user owns. expiry is optional text.
         db.execSQL("CREATE TABLE " + T_PANTRY + " ("
                 + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + "name TEXT NOT NULL, "
@@ -31,11 +55,14 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 + "unit TEXT NOT NULL, "
                 + "expiry TEXT)");
 
+        // Recipes: one row per recipe.
         db.execSQL("CREATE TABLE " + T_RECIPES + " ("
                 + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + "name TEXT NOT NULL, "
                 + "steps TEXT NOT NULL)");
 
+        // Recipe ingredients: many rows per recipe, linked by recipe_id.
+        // This is a one-to-many relationship (one recipe has many ingredients).
         db.execSQL("CREATE TABLE " + T_ING + " ("
                 + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + "recipe_id INTEGER NOT NULL, "
@@ -47,6 +74,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         seedRecipes(db);
     }
 
+    /**
+     * Called when DB_VERSION goes up. The simple approach used here is to drop
+     * everything and rebuild; a production app would migrate the data instead.
+     */
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         db.execSQL("DROP TABLE IF EXISTS " + T_ING);
@@ -55,6 +86,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         onCreate(db);
     }
 
+    // ------------------------------------------------------------------
+    // PANTRY CRUD  (Create, Read, Update, Delete)
+    // ------------------------------------------------------------------
+
+    /** Converts a PantryItem into the column/value pairs SQLite expects. */
     private ContentValues toValues(PantryItem item) {
         ContentValues cv = new ContentValues();
         cv.put("name", item.getName());
@@ -64,25 +100,30 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return cv;
     }
 
+    /** CREATE: inserts a new pantry row and returns its generated id (or -1 on failure). */
     public long insertItem(PantryItem item) {
         return getWritableDatabase().insert(T_PANTRY, null, toValues(item));
     }
 
+    /** READ (all): returns every pantry item, sorted by name ignoring upper/lower case. */
     public List<PantryItem> getAllItems() {
         List<PantryItem> list = new ArrayList<>();
         Cursor c = getReadableDatabase().query(T_PANTRY, null, null, null, null, null,
                 "name COLLATE NOCASE ASC");
         try {
+            // A Cursor walks through the result rows one at a time.
             while (c.moveToNext()) {
                 list.add(readItem(c));
             }
         } finally {
-            c.close();
+            c.close(); // always release the cursor, even if an exception happens
         }
         return list;
     }
 
+    /** READ (one): returns the item with the given id, or null if it does not exist. */
     public PantryItem getItem(long id) {
+        // The ? is a placeholder; passing the value separately prevents SQL injection.
         Cursor c = getReadableDatabase().query(T_PANTRY, null, "id=?",
                 new String[]{String.valueOf(id)}, null, null, null);
         try {
@@ -95,19 +136,23 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return null;
     }
 
+    /** UPDATE: overwrites the row that has the same id as the item. Returns rows changed. */
     public int updateItem(PantryItem item) {
         return getWritableDatabase().update(T_PANTRY, toValues(item), "id=?",
                 new String[]{String.valueOf(item.getId())});
     }
 
+    /** DELETE: removes one pantry row. Returns the number of rows deleted. */
     public int deleteItem(long id) {
         return getWritableDatabase().delete(T_PANTRY, "id=?", new String[]{String.valueOf(id)});
     }
 
+    /** Removes every pantry row (used by the Settings screen). */
     public void clearPantry() {
         getWritableDatabase().delete(T_PANTRY, null, null);
     }
 
+    /** Builds a PantryItem from the cursor's current row. */
     private PantryItem readItem(Cursor c) {
         return new PantryItem(
                 c.getLong(c.getColumnIndexOrThrow("id")),
@@ -117,6 +162,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 c.getString(c.getColumnIndexOrThrow("expiry")));
     }
 
+    // ------------------------------------------------------------------
+    // RECIPES (read only)
+    // ------------------------------------------------------------------
+
+    /** Returns every recipe, each with its full ingredient list already loaded. */
     public List<Recipe> getAllRecipes() {
         SQLiteDatabase db = getReadableDatabase();
         List<Recipe> list = new ArrayList<>();
@@ -127,6 +177,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                         c.getLong(c.getColumnIndexOrThrow("id")),
                         c.getString(c.getColumnIndexOrThrow("name")),
                         c.getString(c.getColumnIndexOrThrow("steps")));
+                // Second query: fetch the ingredient rows that belong to this recipe.
                 r.getIngredients().addAll(loadIngredients(db, r.getId()));
                 list.add(r);
             }
@@ -136,21 +187,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return list;
     }
 
-    public int getRecipeCount() {
-        Cursor cursor = getReadableDatabase().rawQuery(
-                "SELECT COUNT(*) FROM recipes", null
-        );
-
-        try {
-            if (cursor.moveToFirst()) {
-                return cursor.getInt(0);
-            }
-            return 0;
-        } finally {
-            cursor.close();
-        }
-    }
-
+    /** Returns one recipe (with ingredients) by id, or null if it does not exist. */
     public Recipe getRecipe(long id) {
         SQLiteDatabase db = getReadableDatabase();
         Cursor c = db.query(T_RECIPES, null, "id=?", new String[]{String.valueOf(id)},
@@ -170,6 +207,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return null;
     }
 
+    /** Loads all ingredient rows for one recipe, in the order they were inserted. */
     private List<RecipeIngredient> loadIngredients(SQLiteDatabase db, long recipeId) {
         List<RecipeIngredient> list = new ArrayList<>();
         Cursor c = db.query(T_ING, null, "recipe_id=?", new String[]{String.valueOf(recipeId)},
@@ -187,6 +225,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return list;
     }
 
+    // ------------------------------------------------------------------
+    // SEED DATA (runs once, when the database file is first created)
+    // ------------------------------------------------------------------
+
+    /**
+     * Inserts one recipe and its ingredients.
+     * Each ingredient is written as the text "name:quantity:unit",
+     * for example "egg:3:pcs", and split on the colons here.
+     */
     private void addRecipe(SQLiteDatabase db, String name, String steps, String... ingredients) {
         ContentValues rv = new ContentValues();
         rv.put("name", name);
@@ -196,7 +243,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         for (String ing : ingredients) {
             String[] p = ing.split(":");
             ContentValues iv = new ContentValues();
-            iv.put("recipe_id", recipeId);
+            iv.put("recipe_id", recipeId); // links this ingredient to the recipe just inserted
             iv.put("name", p[0]);
             iv.put("quantity", Double.parseDouble(p[1]));
             iv.put("unit", p[2]);
@@ -204,6 +251,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    /** Pre-loads the 22 recipes required by the assignment. */
     private void seedRecipes(SQLiteDatabase db) {
         addRecipe(db, "Scrambled Eggs on Toast",
                 "1. Toast the bread.\n2. Whisk the eggs in a bowl.\n3. Melt the butter in a pan over low heat.\n4. Add the eggs and stir gently until just set.\n5. Spoon the eggs onto the toast and serve.",
