@@ -11,8 +11,16 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Custom adapter for the recipe lists (both the strict list and the optional
+ * "Almost There" list). When showMissing is true it also prints what is missing.
+ *
+ * One adapter class serves both lists: the constructor flag decides which
+ * second line of text each card shows.
+ */
 public class RecipeAdapter extends RecyclerView.Adapter<RecipeAdapter.VH> {
 
+    /** The adapter reports taps back to the Activity through this interface. */
     public interface Listener {
         void onRecipeClick(Recipe recipe);
     }
@@ -26,6 +34,7 @@ public class RecipeAdapter extends RecyclerView.Adapter<RecipeAdapter.VH> {
         this.listener = listener;
     }
 
+    /** Replaces the displayed results and redraws the list. */
     public void setData(List<RecipeMatcher.MatchResult> results) {
         data.clear();
         data.addAll(results);
@@ -46,8 +55,10 @@ public class RecipeAdapter extends RecyclerView.Adapter<RecipeAdapter.VH> {
         h.tvName.setText(m.recipe.getName());
 
         if (showMissing) {
+            // "Almost There" list: exactly one ingredient is missing, so show it.
             h.tvInfo.setText("Missing: " + m.missing.get(0));
         } else {
+            // Strict list: the user has everything.
             h.tvInfo.setText(m.recipe.getIngredients().size() + " ingredients - you have them all");
         }
 
@@ -59,6 +70,7 @@ public class RecipeAdapter extends RecyclerView.Adapter<RecipeAdapter.VH> {
         return data.size();
     }
 
+    /** Holds the views of one row so they can be reused. */
     static class VH extends RecyclerView.ViewHolder {
         final TextView tvName, tvInfo;
 

@@ -14,14 +14,22 @@ import com.google.android.material.appbar.MaterialToolbar;
 import java.util.Calendar;
 import java.util.Locale;
 
+/**
+ * Screen 2: Add / Edit Ingredient.
+ *
+ * One form serves both jobs. If the Intent that started this screen carries an
+ * item id (EXTRA_ITEM_ID) the form is in "edit" mode and is pre-filled from the
+ * database; otherwise it creates a new item. Input is validated before saving.
+ */
 public class AddEditItemActivity extends AppCompatActivity {
 
+    /** Key used to pass the item id between screens through an Intent extra. */
     public static final String EXTRA_ITEM_ID = "item_id";
 
     private EditText etName, etQty, etExpiry;
     private Spinner spUnit;
     private DatabaseHelper db;
-    private long itemId = -1;
+    private long itemId = -1; // -1 means "no id was passed" = add mode
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,15 +43,18 @@ public class AddEditItemActivity extends AppCompatActivity {
         etExpiry = findViewById(R.id.etExpiry);
         spUnit = findViewById(R.id.spUnit);
 
+        // Fill the unit drop-down from the shared UNITS list.
         ArrayAdapter<String> unitAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_dropdown_item, RecipeMatcher.UNITS);
         spUnit.setAdapter(unitAdapter);
 
         MaterialToolbar toolbar = findViewById(R.id.toolbar);
-        toolbar.setNavigationOnClickListener(v -> finish());
+        toolbar.setNavigationOnClickListener(v -> finish()); // back arrow closes the screen
 
+        // Read the id sent by MainActivity. getLongExtra returns -1 if nothing was sent.
         itemId = getIntent().getLongExtra(EXTRA_ITEM_ID, -1);
         if (itemId != -1) {
+            // EDIT MODE: load the existing row and pre-fill the form.
             toolbar.setTitle("Edit Ingredient");
             PantryItem item = db.getItem(itemId);
             if (item != null) {
@@ -67,6 +78,7 @@ public class AddEditItemActivity extends AppCompatActivity {
         findViewById(R.id.btnCancel).setOnClickListener(v -> finish());
     }
 
+    /** Opens a calendar dialog and writes the chosen date as yyyy-MM-dd. */
     private void showDatePicker() {
         Calendar cal = Calendar.getInstance();
         new DatePickerDialog(this, (view, year, month, day) ->
@@ -75,12 +87,15 @@ public class AddEditItemActivity extends AppCompatActivity {
                 .show();
     }
 
+    /** Validates the form; if it is valid, inserts or updates the row and closes the screen. */
     private void save() {
         String name = etName.getText().toString().trim();
         String qtyText = etQty.getText().toString().trim();
         String expiry = etExpiry.getText().toString().trim();
         String unit = (String) spUnit.getSelectedItem();
 
+        // ---- Input validation ----
+        // Each check shows an error on the field and stops, so the user fixes one thing at a time.
         etName.setError(null);
         etQty.setError(null);
 
@@ -94,6 +109,7 @@ public class AddEditItemActivity extends AppCompatActivity {
             etName.requestFocus();
             return;
         }
+        // Letters, spaces, apostrophes and hyphens only (no digits or symbols).
         if (!name.matches("[A-Za-z][A-Za-z '\\-]*")) {
             etName.setError("Use letters only (e.g. tomato, olive oil)");
             etName.requestFocus();
@@ -104,6 +120,7 @@ public class AddEditItemActivity extends AppCompatActivity {
         try {
             qty = Double.parseDouble(qtyText);
         } catch (NumberFormatException e) {
+            // Empty text or something that is not a number.
             etQty.setError("Enter a valid number");
             etQty.requestFocus();
             return;
@@ -119,13 +136,14 @@ public class AddEditItemActivity extends AppCompatActivity {
             return;
         }
 
+        // ---- Create or Update ----
         if (itemId == -1) {
-            db.insertItem(new PantryItem(0, name, qty, unit, expiry));
+            db.insertItem(new PantryItem(0, name, qty, unit, expiry)); // id 0 = not saved yet
             Toast.makeText(this, "Item added", Toast.LENGTH_SHORT).show();
         } else {
             db.updateItem(new PantryItem(itemId, name, qty, unit, expiry));
             Toast.makeText(this, "Item updated", Toast.LENGTH_SHORT).show();
         }
-        finish();
+        finish(); // closing this screen returns to the list, whose onResume() reloads the data
     }
 }
