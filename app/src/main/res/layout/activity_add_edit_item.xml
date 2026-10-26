@@ -79,6 +79,15 @@
                 android:layout_height="wrap_content"
                 android:minHeight="48dp" />
 
+            <!-- Hint added after testing: a unit left on "g" will not match recipes that count in pcs -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Tip: choose pcs for things you count (eggs, tomatoes, bread, onions)."
+                android:textColor="#616161"
+                android:textSize="12sp" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
